@@ -1,0 +1,24 @@
+{
+  "name": "modulejs",
+  "version": "0.1.0",
+  "description": "module js is a lightweight JavaScript framework to asynchronously load JavaScript and CSS files",
+  "main": "module.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sachinsingh30/modulejs.git"
+  },
+  "keywords": [
+    "module",
+    "modulejs",
+    "AMD"
+  ],
+  "author": "Sachin Singh",
+  "license": "UNLICENSED",
+  "bugs": {
+    "url": "https://github.com/sachinsingh30/modulejs/issues"
+  },
+  "homepage": "https://github.com/sachinsingh30/modulejs#readme"
+}
