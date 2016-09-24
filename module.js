@@ -3,10 +3,20 @@
  * @author Sachin Singh
  * @version 0.1.0
  */
-(function (w) {
+;
+(function (w, d, setTimeout) {
     w.mod = w.mod || {};
-    var modules = {},
+    var uids = [],
+        modules = {},
         settings = {},
+        errorCodes = {
+            "001": "Error loading script file: ",
+            "002": "Error loading one or more modules",
+            "003": "Error in path: ",
+            "warnings": {
+                "w001": "ModuleJS supports up to one anonymous module per set. Make sure to specify a module name to include multiple modules."
+            }
+        }
         regex = {
             jsSuffix: /\.js$/,
             cssSuffix: /\.css$/,
@@ -17,6 +27,42 @@
             scheme: /^([a-zA-Z]+:\/{2}|\/{2})/
         };
 
+    function Emitter() {
+        var events = {};
+        this.emit = function (eventName, eventData) {
+            if (typeof eventName !== "string") {
+                return;
+            }
+            if (events[eventName]) {
+                events[eventName].data = eventData;
+                each(events[eventName].handlers, function (index, fn) {
+                    fn.call({
+                        eventName: events[eventName].eventName,
+                        data: events[eventName].data
+                    });
+                });
+                delete events[eventName].data;
+                events[eventName].handlers.length = 0;
+            }
+        };
+        this.on = function (eventName, eventHandler) {
+            if (typeof eventName !== "string" && typeof eventHandler !== "function") {
+                return;
+            }
+            if (!events[eventName]) {
+                events[eventName] = {
+                    eventName: eventName,
+                    handlers: []
+                }
+            }
+            events[eventName].handlers.push(eventHandler);
+            return this;
+        };
+        this.clearAllEvents = function () {
+            events = {};
+        };
+    }
+    
     function each(ob, callback) {
         var key = 0, result;
         if (typeof ob === "object") {
@@ -33,17 +79,16 @@
         }
     }
 
-    function triggerEvent(eventName, eventData) {
-        if (Event) {
-            var event = new Event(eventName, {
-                detail: {
-                    data: eventData
-                },
-                bubbles: false,
-                cancelable: false
+    function filter(arr, fn) {
+        var filteredArr = [];
+        if (Array.isArray(arr) && typeof fn === "function") {
+            each(arr, function (index, item) {
+                if (fn(item)) {
+                    filteredArr.push(item);
+                }
             });
-            document.dispatchEvent(event);
         }
+        return filteredArr;
     }
 
     function clone(ob) {
@@ -87,7 +132,7 @@
             path = "";
         }
         if (path.length === 0) {
-            console.error("Error in path: " + url);
+            console.error(errorCodes["003"] + url);
         }
         return path;
     }
@@ -111,11 +156,23 @@
 
     function resolveAllPaths(pathList) {
         var clonePathList;
-        if (typeof settings.pathList === "object") {
+        if (typeof settings.paths === "object") {
             clonePathList = clone(pathList);
             pathList.length = 0;
             each(clonePathList, function (index, path) {
-                clonePathList[index] = refinePath(settings.path[path] || path);
+                var namedPathObject = settings.paths[path],
+                    namedPath = "",
+                    versioning = false;
+                if (typeof namedPathObject === "object") {
+                    namedPath = namedPathObject.path;
+                    if (namedPathObject.version && !settings.cache) {
+                        versioning = true;
+                    }
+                }
+                clonePathList[index] = refinePath(namedPath || path);
+                if (clonePathList[index] && versioning) {
+                    clonePathList[index] += "?v=" + namedPathObject.version;
+                }
             });
         }
         each(clonePathList, function (index, path) {
@@ -151,9 +208,13 @@
         return scriptTags;
     }
 
-    function _get(path) {
+    function _get(path, emitter) {
         var pathList = [], scripts,
-            availableScripts, loadedScripts = 0;
+            addedScr = [],
+            uid = (new Date()).getTime();
+        if (!path) {
+            return;
+        }
         if (typeof path === "string") {
             pathList.push(path);
         } else {
@@ -161,23 +222,96 @@
                 pathList = clone(path);
             }
         }
+        uids.push(uid);
+        modules[uid] = [];
         resolveAllPaths(pathList);
         getPageScripts().filter(pathList);
         scripts = createScriptTags(pathList);
-        availableScripts = scripts.length;
+        availableScr = scripts.length;
+        each(scripts, function (index, scr) {
+            addedScr.push(new Promise(function (resolve, reject) {
+                scr.onload = function () {
+                    if (uid === uids[uids.length - 1]) {
+                        resolve();
+                    } else {
+                        emitter.on("apiready", function () {
+                            resolve();
+                        })
+                        .on("apierror", function () {
+                            reject(errorCodes["002"]);
+                        });
+                    }
+                };
+                scr.onerror = function () {
+                    reject(errorCodes["001"] + scr.src);
+                };
+                document.body.appendChild(scr);
+            }));
+        });
         
+        return new Promise(function (resolve, reject) {
+            Promise.all(addedScr).then(function () {
+                emitter.emit("apiready");
+                emitter.clearAllEvents();
+                uids.pop();
+            })
+            .catch(function (reason) {
+                emitter.emit("apierror");
+                reject(reason);
+            });
+        });
+    }
+
+    function _create(name, dependencies, callback, exec) {
+        if (Array.isArray(name)) {
+            exec = callback;
+            callback = dependencies;
+            dependencies = name;
+            name = _getUid();
+            console.warn(errorCodes.warnings["w001"]);
+        }
+        if (typeof exec !== "boolean") {
+            exec = true;
+        }
+        _get(dependencies).then(function (modules) {
+            modules[_getUid()].push(_obj(name, _exec(callback, modules, exec)));
+        })
+        .catch(function (err) {
+            console.error(err);
+        });
+    }
+
+    function _getUid() {
+        return uids[uids.length - 1];
+    }
+
+    function _obj(prop, value) {
+        var ob = {};
+        ob[prop] = value;
+        return ob;
+    }
+
+    function _exec(fn, modules, exec) {
+        if (typeof fn === "function" && exec) {
+            return new fn(modules);
+        }
+        return fn;
     }
 
     mod = (function () {
+        var emitter = new Emitter();
         var api = {
             config: function (conf) {
                 overrideSettings(conf);
                 return this;
             },
             get: function (path) {
-                return _get(path);
+                return _get(path, emitter);
+            },
+            create: function (name, dependencies, callback, exec) {
+                _create(name, dependencies, callback, exec);
             }
         };
         return api;
     }());
-}(window));
+}(window, window.document, window.setTimeout));
