@@ -1,11 +1,11 @@
 /**
- * ModuleJS is an asynchronous JavaScript and CSS file loader for performance driven websites
+ * ModuleJS is an asynchronous JavaScript file loader for performance driven websites
  * @author Sachin Singh
  * @version 0.1.0
  */
 ;
 (function (w, d, setTimeout) {
-    w.mod = w.mod || {};
+    w.modules = w.modules || {};
     var uids = [],
         modules = {},
         settings = {},
@@ -252,8 +252,10 @@
         return new Promise(function (resolve, reject) {
             Promise.all(addedScr).then(function () {
                 emitter.emit("apiready");
-                emitter.clearAllEvents();
                 uids.pop();
+                if (uids.length === 0) {
+                    emitter.clearAllEvents();
+                }
             })
             .catch(function (reason) {
                 emitter.emit("apierror");
@@ -267,7 +269,7 @@
             exec = callback;
             callback = dependencies;
             dependencies = name;
-            name = _getUid();
+            name = undefined;
             console.warn(errorCodes.warnings["w001"]);
         }
         if (typeof exec !== "boolean") {
@@ -298,7 +300,7 @@
         return fn;
     }
 
-    mod = (function () {
+    w.modules = (function () {
         var emitter = new Emitter();
         var api = {
             config: function (conf) {
@@ -314,4 +316,7 @@
         };
         return api;
     }());
+    if (typeof w.$ === undefined) {
+        w.$ = w.modules;
+    }
 }(window, window.document, window.setTimeout));
