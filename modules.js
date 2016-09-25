@@ -7,6 +7,7 @@
 (function (w, d, setTimeout) {
     w.modules = w.modules || {};
     var uids = [],
+        resolvedPaths = [],
         modules = {},
         settings = {},
         errorCodes = {
@@ -155,7 +156,7 @@
     }
 
     function resolveAllPaths(pathList) {
-        var clonePathList;
+        var clonePathList, mods;
         if (typeof settings.paths === "object") {
             clonePathList = clone(pathList);
             pathList.length = 0;
@@ -176,10 +177,22 @@
             });
         }
         each(clonePathList, function (index, path) {
+            var resolvedPathList = null;
             if (path) {
                 pathList.push(path);
+                resolvedPathList = filter(resolvedPaths, function (ob) {
+                    return path === ob.path;
+                });
+                if (resolvedPathList.length) {
+                    each(resolvedPathList, function (index, pathOb) {
+                        each(modules[pathOb.uid], function (index, mod) {
+                            mods[mod.key] = mod.value;
+                        });
+                    });
+                }
             }
         });
+        return mods;
     }
 
     function getPageScripts() {
@@ -211,6 +224,7 @@
     function _get(path, emitter) {
         var pathList = [], scripts,
             addedScr = [],
+            mods = {},
             uid = (new Date()).getTime();
         if (!path) {
             return;
@@ -224,7 +238,9 @@
         }
         uids.push(uid);
         modules[uid] = [];
-        resolveAllPaths(pathList);
+        each(resolveAllPaths(pathList), function (key, value) {
+            mods[key] = value;
+        });
         getPageScripts().filter(pathList);
         scripts = createScriptTags(pathList);
         availableScr = scripts.length;
@@ -232,9 +248,22 @@
             addedScr.push(new Promise(function (resolve, reject) {
                 scr.onload = function () {
                     if (uid === uids[uids.length - 1]) {
+                        resolvedPaths.push({uid: uid, path: this.src});
+                        each(modules[uid], function (index, mod) {
+                            if (typeof mod.key === "undefined") {
+                                mod.key = _getFileName(this.src);
+                            }
+                        });
                         resolve();
                     } else {
+                        var that = this;
                         emitter.on("apiready", function () {
+                            resolvedPaths.push({uid: uid, path: that.src});
+                            each(modules[uid], function (index, mod) {
+                                if (typeof mod.key === "undefined") {
+                                    mod.key = _getFileName(that.src);
+                                }
+                            });
                             resolve();
                         })
                         .on("apierror", function () {
@@ -252,16 +281,24 @@
         return new Promise(function (resolve, reject) {
             Promise.all(addedScr).then(function () {
                 emitter.emit("apiready");
+                each(modules[uid], function (index, mod) {
+                    mods[mod.key] = mod.value;
+                });
                 uids.pop();
                 if (uids.length === 0) {
                     emitter.clearAllEvents();
                 }
+                resolve(mods);
             })
             .catch(function (reason) {
                 emitter.emit("apierror");
                 reject(reason);
             });
         });
+    }
+
+    function _getFileName(path) {
+        return path.match(/([^\\/]+)(\.[^\\/]+)$/)[1];
     }
 
     function _create(name, dependencies, callback, exec) {
@@ -276,7 +313,7 @@
             exec = true;
         }
         _get(dependencies).then(function (modules) {
-            modules[_getUid()].push(_obj(name, _exec(callback, modules, exec)));
+            modules[_getUid()].push({key: name, value: _exec(callback, modules, exec)});
         })
         .catch(function (err) {
             console.error(err);
@@ -285,12 +322,6 @@
 
     function _getUid() {
         return uids[uids.length - 1];
-    }
-
-    function _obj(prop, value) {
-        var ob = {};
-        ob[prop] = value;
-        return ob;
     }
 
     function _exec(fn, modules, exec) {
