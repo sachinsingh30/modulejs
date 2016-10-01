@@ -8,6 +8,7 @@
     w.modules = w.modules || {};
     var uids = [],
         resolvedPaths = [],
+        emitter = null,
         modules = {},
         settings = {},
         errorCodes = {
@@ -68,7 +69,7 @@
         var key = 0, result;
         if (typeof ob === "object") {
             for (key in ob) {
-                result = callback && callback(index, ob[index]);
+                result = callback && callback(key, ob[key]);
                 if (typeof result === "boolean") {
                     if (!result) {
                         break;
@@ -157,25 +158,23 @@
 
     function resolveAllPaths(pathList) {
         var clonePathList, mods;
-        if (typeof settings.paths === "object") {
-            clonePathList = clone(pathList);
-            pathList.length = 0;
-            each(clonePathList, function (index, path) {
-                var namedPathObject = settings.paths[path],
-                    namedPath = "",
-                    versioning = false;
-                if (typeof namedPathObject === "object") {
-                    namedPath = namedPathObject.path;
-                    if (namedPathObject.version && !settings.cache) {
-                        versioning = true;
-                    }
+        clonePathList = clone(pathList);
+        pathList.length = 0;
+        each(clonePathList, function (index, path) {
+            var namedPathObject = settings.paths && settings.paths[path],
+                namedPath = "",
+                versioning = false;
+            if (typeof namedPathObject === "object") {
+                namedPath = namedPathObject.path;
+                if (namedPathObject.version && !settings.cache) {
+                    versioning = true;
                 }
-                clonePathList[index] = refinePath(namedPath || path);
-                if (clonePathList[index] && versioning) {
-                    clonePathList[index] += "?v=" + namedPathObject.version;
-                }
-            });
-        }
+            }
+            clonePathList[index] = refinePath(namedPath || path);
+            if (clonePathList[index] && versioning) {
+                clonePathList[index] += "?v=" + namedPathObject.version;
+            }
+        });
         each(clonePathList, function (index, path) {
             var resolvedPathList = null;
             if (path) {
@@ -196,17 +195,17 @@
     }
 
     function getPageScripts() {
-        var scripts = document.getElementsByTagName("script");
+        var scripts = Array.prototype.slice.call(document.getElementsByTagName("script"), 0);
         return {
             filter: function (pathList) {
                 each(scripts, function (index, scr) {
-                    var index = pathList.indexOf(scr.src);
+                    var index = pathList.indexOf(scr.getAttribute("src"));
                     if(~index) {
                         pathList.splice(index, 0);
                     }
                 });
             },
-            list: Array.prototype.slice.call(scripts, 0)
+            list: scripts
         };
     }
 
@@ -221,7 +220,7 @@
         return scriptTags;
     }
 
-    function _get(path, emitter) {
+    function _get(path) {
         var pathList = [], scripts,
             addedScr = [],
             mods = {},
@@ -284,7 +283,7 @@
                 each(modules[uid], function (index, mod) {
                     mods[mod.key] = mod.value;
                 });
-                uids.pop();
+                uids.splice(uids.indexOf(uid), 1);
                 if (uids.length === 0) {
                     emitter.clearAllEvents();
                 }
@@ -312,8 +311,8 @@
         if (typeof exec !== "boolean") {
             exec = true;
         }
-        _get(dependencies).then(function (modules) {
-            modules[_getUid()].push({key: name, value: _exec(callback, modules, exec)});
+        _get(dependencies).then(function (mods) {
+            modules[_getUid()].push({key: name, value: _exec(callback, mods, exec)});
         })
         .catch(function (err) {
             console.error(err);
@@ -331,15 +330,15 @@
         return fn;
     }
 
-    w.modules = (function () {
-        var emitter = new Emitter();
+    w.$ = w.modules = (function () {
+        emitter = new Emitter();
         var api = {
             config: function (conf) {
                 overrideSettings(conf);
                 return this;
             },
             get: function (path) {
-                return _get(path, emitter);
+                return _get(path);
             },
             create: function (name, dependencies, callback, exec) {
                 _create(name, dependencies, callback, exec);
@@ -347,7 +346,4 @@
         };
         return api;
     }());
-    if (typeof w.$ === undefined) {
-        w.$ = w.modules;
-    }
 }(window, window.document, window.setTimeout));
